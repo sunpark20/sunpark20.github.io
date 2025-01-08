@@ -1,4 +1,4 @@
-<a href="https://sunpark20.github.io/hosting/" target="_blank" rel="noopener noreferrer">근무표 만들기 사이트 바로가기</a>
+<a href="https://sunpark20.github.io." target="_blank" rel="noopener noreferrer">근무표 만들기 사이트 바로가기</a>
 
 # 머하는것? 근무자를 입력받아 달력에 표시해주는 사이트입니다.
 ## 간단설명
