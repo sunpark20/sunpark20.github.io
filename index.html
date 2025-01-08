@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9335622001765471"
+     crossorigin="anonymous"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>달력 및 당직자 관리</title>
+    <style>
+        input {
+            text-align: right;
+        }
+        input::placeholder {
+            text-align: center;
+        }
+        body {
+            font-family: serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        #calendar, #dutyRoster {
+            width: 100%;
+            margin: 20px 0;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .header h2 {
+            margin: 0;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: center;
+        }
+        #calendar th, #calendar td {
+            width: 14.28%;
+            vertical-align: top;
+        }
+        #calendar th {
+            background-color: #4CAF50;
+            color: white;
+            height: 50px;
+            vertical-align: middle;
+        }
+        #calendar td {
+            height: 100px;
+            text-align: left;
+        }
+        .holiday, .weekend {
+            color: red;
+            font-weight: bold;
+        }
+        .other-month {
+            color: #ccc;
+        }
+        .holiday-name {
+            font-size: 0.8em;
+            margin-left: 5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 70%;
+            display: inline-block;
+        }
+        .date-container {
+            display: flex;
+            align-items: baseline;
+        }
+        .duty-info {
+            font-size: 0.8em;
+            margin-top: 5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .button-container button {
+            margin-right: 10px;
+        }
+        .delete-btn {
+            background-color: #ff4d4d;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .non-editable {
+            background-color: #f2f2f2;
+            color: #333;
+            white-space: nowrap;
+        }
+        #dutyRoster {
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div><a href="https://github.com/sunpark20/hosting">설명서로 이동</a>
+    <p><a href="code.html">평일/휴일 구분없이 근무표만들기 이동</a></p></div>
+    <div id="calendar"></div>
+    <div id="dutyRoster">
+        <h2>(평일)당직자 관리</h2>
+        <div class="button-container">
+            1. 평일 배정을 시작할 년, 월, 일을 입력해주세요. (예: 2024년 8월 12일)
+            <input type="number" id="startYear" placeholder="년도 (예: 2024)" min="2024" max="2100">
+            년
+            <input type="number" id="startMonth" placeholder="월 (1-12)" min="1" max="12">
+            월
+            <input type="number" id="startDay" placeholder="일 (1-31)" min="1" max="31">
+            일
+            <button onclick="saveData()">평일 저장 후 달력반영</button>
+            <br>
+            <button onclick="resetTable()">초기화</button>
+            <button onclick="addColumn()">열 추가</button>
+            <button onclick="addRow()">행 추가</button>
+        </div>
+
+        <table id="rosterTable">
+            <tr>
+                <th>근무자 종류</th>
+                <th>
+                    <input type="text" placeholder="근무자 종류">
+                    <button class="delete-btn" onclick="deleteColumn(this)">-</button>
+                </th>
+            </tr>
+            <tr>
+                <th>하루에 몇명씩 근무</th>
+                <th>
+                    <input type="number" placeholder="근무자수" min="1" max="5" value="1">
+                </th>
+            </tr>
+            <tr>
+                <td>
+                    순번1
+                    <button class="delete-btn" onclick="deleteRow(this)">-</button>
+                </td>
+                <td><input type="text"></td>
+            </tr>
+        </table>
+    </div>
+
+    <div id="holidayDutyRoster">
+        <h2>(휴일)당직자 관리</h2>
+        <div class="button-container">
+            1. 휴일 배정을 시작할 년, 월, 일을 입력해주세요. (예: 2024년 8월 10일)
+            <input type="number" id="holidayStartYear" placeholder="년도 (예: 2024)" min="2000" max="2100">
+            년
+            <input type="number" id="holidayStartMonth" placeholder="월 (1-12)" min="1" max="12">
+            월
+            <input type="number" id="holidayStartDay" placeholder="일 (1-31)" min="1" max="31">
+            일
+            <button onclick="saveHolidayData()">휴일 저장 후 달력반영</button>
+            <br>
+            <button onclick="resetHolidayTable()">초기화</button>
+            <button onclick="addHolidayColumn()">열 추가</button>
+            <button onclick="addHolidayRow()">행 추가</button>
+        </div>
+
+        <table id="holidayRosterTable">
+            <tr>
+                <th>근무자 종류</th>
+                <th>
+                    <input type="text" placeholder="근무자 종류">
+                    <button class="delete-btn" onclick="deleteHolidayColumn(this)">-</button>
+                </th>
+            </tr>
+            <tr>
+                <th>하루에 몇명씩 근무</th>
+                <th>
+                    <input type="number" placeholder="근무자수" min="1" max="5" value="1">
+                </th>
+            </tr>
+            <tr>
+                <td>
+                    순번1
+                    <button class="delete-btn" onclick="deleteHolidayRow(this)">-</button>
+                </td>
+                <td><input type="text"></td>
+            </tr>
+        </table>
+    </div>
+
+    <script>
+        let holidayRowCount = 1;
+        let holidayColCount = 1;
+        let holidayStartDate;
+
+        function addHolidayColumn() {
+            const table = document.getElementById('holidayRosterTable');
+            const rows = table.getElementsByTagName('tr');
+            for (let i = 0; i < rows.length; i++) {
+                const cell = rows[i].insertCell(-1);
+                cell.style.textAlign = 'center';
+                if (i === 0) {
+                    cell.innerHTML = `
+                        <input type="text" placeholder="근무자 종류">
+                        <button class="delete-btn" onclick="deleteHolidayColumn(this)">-</button>
+                    `;
+                } else if (i === 1) {
+                    cell.innerHTML = `
+                        <input type="number" placeholder="근무자수" min="1" max="5" value="1">
+                    `;
+                }
+                else {
+                    cell.innerHTML = '<input type="text">';
+                }
+            }
+            holidayColCount++;
+        }
+
+        function addHolidayRow() {
+            const table = document.getElementById('holidayRosterTable');
+            const newRow = table.insertRow(-1);
+            for (let i = 0; i < holidayColCount + 1; i++) {
+                const cell = newRow.insertCell(i);
+                cell.style.textAlign = 'center';
+                if (i === 0) {
+                    cell.innerHTML = `
+                        <span class="non-editable">순번${holidayRowCount+1}</span>
+                        <button class="delete-btn" onclick="deleteHolidayRow(this)">-</button>
+                    `;
+                } else {
+                    cell.innerHTML = '<input type="text">';
+                }
+            }
+            holidayRowCount++;
+        }
+
+        function deleteHolidayColumn(button) {
+            const cell = button.parentNode;
+            const colIndex = cell.cellIndex;
+            const table = document.getElementById('holidayRosterTable');
+            for (let i = 0; i < table.rows.length; i++) {
+                table.rows[i].deleteCell(colIndex);
+            }
+            holidayColCount--;
+        }
+
+        function deleteHolidayRow(button) {
+            const row = button.parentNode.parentNode;
+            row.parentNode.removeChild(row);
+            holidayRowCount--;
+        }
+
+        function saveHolidayData() {
+            holidayDutyState = {};  // 상태 초기화
+            holidayAssignmentResults = {};  // 결과 초기화
+
+            const table = document.getElementById('holidayRosterTable');
+            const data = [];
+            for (let i = 0; i < table.rows.length; i++) {
+                const row = table.rows[i];
+                const rowData = [];
+                for (let j = 0; j < row.cells.length; j++) {
+                    const input = row.cells[j].querySelector('input');
+                    if (input) {
+                        rowData.push(input.value);
+                    } else {
+                        const cellText = row.cells[j].innerText.replace(' -', '').trim();
+                        rowData.push(cellText);
+                    }
+                }
+                data.push(rowData);
+            }
+            localStorage.setItem('holidayDutyRosterData', JSON.stringify(data));
+
+            const startYear = parseInt(document.getElementById('holidayStartYear').value);
+            const startMonth = parseInt(document.getElementById('holidayStartMonth').value);
+            const startDay = parseInt(document.getElementById('holidayStartDay').value);
+
+            if (startYear && startMonth && startDay) {
+                if (startYear < 2000 || startYear > 2100) {
+                    alert('유효한 연도를 입력해주세요 (2000-2100).');
+                    return;
+                }
+                if (startMonth < 1 || startMonth > 12) {
+                    alert('유효한 월을 입력해주세요 (1-12).');
+                    return;
+                }
+                if (startDay < 1 || startDay > 31) {
+                    alert('유효한 일을 입력해주세요 (1-31).');
+                    return;
+                }
+                holidayStartDate = new Date(startYear, startMonth - 1, startDay);
+                localStorage.setItem('holidayStartDate', holidayStartDate.toISOString());
+            } else {
+                alert('시작 날짜를 모두 입력해주세요.');
+                return;
+            }
+
+            alert('휴일 당직 데이터가 저장되었습니다!');
+            loadHolidayData();
+            renderCalendar();
+            saveState();
+        }
+
+        function resetHolidayTable() {
+            if (confirm("정말로 휴일 당직 데이터를 초기화하시겠습니까? 모든 데이터가 삭제됩니다.")) {
+                const table = document.getElementById('holidayRosterTable');
+                table.innerHTML = `
+                    <tr>
+                        <th>근무자 종류</th>
+                        <th>
+                            <input type="text" placeholder="근무자 종류">
+                            <button class="delete-btn" onclick="deleteHolidayColumn(this)">-</button>
+                        </th>
+                    </tr>
+                    <tr>
+                        <th>하루에 몇명씩 근무</th>
+                        <th>
+                            <input type="number" placeholder="근무자수" min="1" max="5" value="1">
+                        </th>
+                    </tr>
+                    <tr>
+                        <td>
+                            순번1
+                            <button class="delete-btn" onclick="deleteHolidayRow(this)">-</button>
+                        </td>
+                        <td><input type="text"></td>
+                    </tr>
+                `;
+                holidayRowCount = 1;
+                holidayColCount = 1;
+                localStorage.removeItem('holidayDutyRosterData');
+                localStorage.removeItem('holidayDutyState');
+                localStorage.removeItem('holidayAssignmentResults');
+                // 테이블 초기화 후 바로 화면에 반영
+                loadHolidayData();
+            }
+        }
+
+        const holidays = {
+            2024: {
+                "2024-01-01": "1월 1일",
+                "2024-02-09": "설날 전날",
+                "2024-02-10": "설날",
+                "2024-02-11": "설날 다음 날",
+                "2024-02-12": "대체공휴일(설날)",
+                "2024-03-01": "3ㆍ1절",
+                "2024-04-10": "제22대국회의원선거",
+                "2024-05-05": "어린이날",
+                "2024-05-06": "대체공휴일(어린이날)",
+                "2024-05-15": "부처님 오신 날",
+                "2024-06-06": "현충일",
+                "2024-08-15": "광복절",
+                "2024-09-16": "추석 전날",
+                "2024-09-17": "추석",
+                "2024-09-18": "추석 다음 날",
+                "2024-10-03": "개천절",
+                "2024-10-09": "한글날",
+                "2024-12-25": "크리스마스"
+            },
+            2025: {
+                "2025-01-01": "1월 1일",
+                "2025-01-28": "설날 전날",
+                "2025-01-29": "설날",
+                "2025-01-30": "설날 연휴",
+                "2025-03-03": "3ㆍ1절 대체공휴일",
+                "2025-05-05": "어린이날",
+                "2025-05-06": "대체공휴일(부처님오신날)",
+                "2025-06-06": "현충일",
+                "2025-08-15": "광복절",
+                "2025-10-03": "개천절",
+                "2025-10-06": "추석",
+                "2025-10-07": "추석연휴",
+                "2025-10-08": "추석 대체공휴일",
+                "2025-10-09": "한글날",
+                "2025-12-25": "크리스마스"
+            }
+        };
+
+        const calendar = document.getElementById('calendar');
+        let currentDate = new Date();
+        let startDate
+        function saveState() {
+            localStorage.setItem('weekdayDutyState', JSON.stringify(weekdayDutyState));
+            localStorage.setItem('holidayDutyState', JSON.stringify(holidayDutyState));
+            localStorage.setItem('weekdayAssignmentResults', JSON.stringify(weekdayAssignmentResults));
+            localStorage.setItem('holidayAssignmentResults', JSON.stringify(holidayAssignmentResults));
+        }
+
+        function loadState() {
+            const savedWeekdayState = localStorage.getItem('weekdayDutyState');
+            const savedHolidayState = localStorage.getItem('holidayDutyState');
+            const savedWeekdayAssignments = localStorage.getItem('weekdayAssignmentResults');
+            const savedHolidayAssignments = localStorage.getItem('holidayAssignmentResults');
+
+            if (savedWeekdayState) {
+                weekdayDutyState = JSON.parse(savedWeekdayState);
+            }
+            if (savedHolidayState) {
+                holidayDutyState = JSON.parse(savedHolidayState);
+            }
+            if (savedWeekdayAssignments) {
+                weekdayAssignmentResults = JSON.parse(savedWeekdayAssignments);
+            }
+            if (savedHolidayAssignments) {
+                holidayAssignmentResults = JSON.parse(savedHolidayAssignments);
+            }
+        }
+
+        function renderCalendar() {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            let html = `
+                <div class="header">
+                    <button onclick="changeMonth(-1)">< 이전</button>
+                    <h2>${year}년 ${month + 1}월</h2>
+                    <button onclick="changeMonth(1)">다음 ></button>
+                </div>
+                <table>
+                    <tr>
+                        <th class="weekend">일</th>
+                        <th>월</th>
+                        <th>화</th>
+                        <th>수</th>
+                        <th>목</th>
+                        <th>금</th>
+                        <th class="weekend">토</th>
+                    </tr>
+            `;
+            let day = 1;
+            for (let i = 0; i < 6; i++) {
+                html += '<tr>';
+                for (let j = 0; j < 7; j++) {
+                    if (i === 0 && j < firstDay.getDay()) {
+                        const prevMonthLastDay = new Date(year, month, 0).getDate();
+                        const prevMonthDay = prevMonthLastDay - firstDay.getDay() + j + 1;
+                        html += `<td class="other-month">${prevMonthDay}</td>`;
+                    } else if (day > lastDay.getDate()) {
+                        const nextMonthDay = day - lastDay.getDate();
+                        html += `<td class="other-month">${nextMonthDay}</td>`;
+                        day++;
+                    } else {
+                        const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        const holiday = holidays[year] ? holidays[year][date] : null;
+                        const isWeekend = j === 0 || j === 6;
+                        const className = holiday || isWeekend ? 'holiday weekend' : '';
+                        html += `<td class="${className}" data-date="${date}">
+                            <div class="date-container">
+                                ${day}
+                                ${holiday ? `<span class="holiday-name">${holiday}</span>` : ''}
+                            </div>
+                            <div class="duty-info"></div>
+                        </td>`;
+                        day++;
+                    }
+                }
+                html += '</tr>';
+                if (day > lastDay.getDate()) break;
+            }
+            html += '</table>';
+            calendar.innerHTML = html;
+            assignDutyToCalendar();
+        }
+
+        let rowCount = 1;
+        let colCount = 1;
+
+        function addColumn() {
+            const table = document.getElementById('rosterTable');
+            const rows = table.getElementsByTagName('tr');
+            for (let i = 0; i < rows.length; i++) {
+                const cell = rows[i].insertCell(-1);
+                cell.style.textAlign = 'center';
+                if (i === 0) {
+                    cell.innerHTML = `
+                        <input type="text" placeholder="근무자 종류">
+                        <button class="delete-btn" onclick="deleteColumn(this)">-</button>
+                    `;
+                } else if(i === 1) {
+                    cell.innerHTML = `
+                        <input type="number" placeholder="근무자수" min="1" max="5" value="1">
+                    `;
+                } else {
+                    cell.innerHTML = '<input type="text">';
+                }
+            }
+            colCount++;
+        }
+
+        function addRow() {
+            const table = document.getElementById('rosterTable');
+            const newRow = table.insertRow(-1);
+            for (let i = 0; i < colCount + 1; i++) {
+                const cell = newRow.insertCell(i);
+                cell.style.textAlign = 'center';
+                if (i === 0) {
+                    cell.innerHTML = `
+                        <span class="non-editable">순번${rowCount+1}</span>
+                        <button class="delete-btn" onclick="deleteRow(this)">-</button>
+                    `;
+                } else {
+                    cell.innerHTML = '<input type="text">';
+                }
+            }
+            rowCount++;
+        }
+
+        function deleteColumn(button) {
+            const cell = button.parentNode;
+            const colIndex = cell.cellIndex;
+            const table = document.getElementById('rosterTable');
+            for (let i = 0; i < table.rows.length; i++) {
+                table.rows[i].deleteCell(colIndex);
+            }
+            colCount--;
+        }
+
+        function deleteRow(button) {
+            const row = button.parentNode.parentNode;
+            row.parentNode.removeChild(row);
+            rowCount--;
+        }
+
+        function saveData() {
+            weekdayDutyState = {};  // 상태 초기화
+            weekdayAssignmentResults = {};  // 결과 초기화
+
+            const table = document.getElementById('rosterTable');
+            const data = [];
+            for (let i = 0; i < table.rows.length; i++) {
+                const row = table.rows[i];
+                const rowData = [];
+                for (let j = 0; j < row.cells.length; j++) {
+                    const input = row.cells[j].querySelector('input');
+                    if (input) {
+                        rowData.push(input.value);
+                    } else {
+                        const cellText = row.cells[j].innerText.replace(' -', '').trim();
+                        rowData.push(cellText);
+                    }
+                }
+                data.push(rowData);
+            }
+            localStorage.setItem('dutyRosterData', JSON.stringify(data));
+
+            const startYear = parseInt(document.getElementById('startYear').value);
+            const startMonth = parseInt(document.getElementById('startMonth').value);
+            const startDay = parseInt(document.getElementById('startDay').value);
+
+            if (startYear && startMonth && startDay) {
+                if (startYear < 2000 || startYear > 2100) {
+                    alert('유효한 연도를 입력해주세요 (2000-2100).');
+                    return;
+                }
+                if (startMonth < 1 || startMonth > 12) {
+                    alert('유효한 월을 입력해주세요 (1-12).');
+                    return;
+                }
+                if (startDay < 1 || startDay > 31) {
+                    alert('유효한 일을 입력해주세요 (1-31).');
+                    return;
+                }
+                startDate = new Date(startYear, startMonth - 1, startDay);
+                localStorage.setItem('startDate', startDate.toISOString());
+            } else {
+                alert('시작 날짜를 모두 입력해주세요.');
+                return;
+            }
+
+            alert('평일 당직 데이터가 저장되었습니다!');
+            loadData();
+            renderCalendar();
+            saveState();
+        }
+
+        function resetTable() {
+            if (confirm("정말로 초기화하시겠습니까? 모든 데이터가 삭제됩니다.")) {
+                const table = document.getElementById('rosterTable');
+                table.innerHTML = `
+                    <tr>
+                        <th>근무자 종류</th>
+                        <th>
+                            <input type="text" placeholder="근무자 종류">
+                            <button class="delete-btn" onclick="deleteColumn(this)">-</button>
+                        </th>
+                    </tr>
+                    <tr>
+                        <th>하루에 몇명씩 근무</th>
+                        <th>
+                            <input type="number" placeholder="근무자수" min="1" max="5" value="1">
+                        </th>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="non-editable">순번1</span>
+                            <button class="delete-btn" onclick="deleteRow(this)">-</button>
+                        </td>
+                        <td><input type="text"></td>
+                    </tr>
+                `;
+                rowCount = 1;
+                colCount = 1;
+                localStorage.removeItem('dutyRosterData');
+                localStorage.removeItem('weekdayDutyState');
+                localStorage.removeItem('weekdayAssignmentResults');
+                // 테이블 초기화 후 바로 화면에 반영
+                loadData();
+            }
+        }
+
+        function loadData() {
+            const data = JSON.parse(localStorage.getItem('dutyRosterData'));
+            const table = document.getElementById('rosterTable');
+            table.innerHTML = '';
+            if (data) {
+                for (let i = 0; i < data.length; i++) {
+                    const row = table.insertRow(-1);
+                    for (let j = 0; j < data[i].length; j++) {
+                        const cell = row.insertCell(j);
+                        if (i === 0 && j === 0) {
+                            cell.innerHTML = `<span>${data[i][j]}</span>`;
+                        }
+                        else if (i === 0) {
+                            cell.innerHTML = `
+                                <input type="text" placeholder="근무자 종류" value="${data[i][j]}">
+                                <button class="delete-btn" onclick="deleteColumn(this)">-</button>
+                            `;
+                        } else if (i === 1 && j === 0) {
+                            cell.innerHTML = `<span>${data[i][j]}</span>`;
+                        }
+                        else if (i === 1) {
+                            cell.innerHTML = `
+                                <input type="number" placeholder="근무자수" min="1" max="5" value="${data[i][j]}">
+                            `;
+                        } else {
+                            if (j === 0) {
+                                cell.innerHTML = `
+                                    <span class="non-editable">${data[i][j]}</span>
+                                    <button class="delete-btn" onclick="deleteRow(this)">-</button>
+                                `;
+                            } else {
+                                cell.innerHTML = `<input type="text" value="${data[i][j]}">`;
+                            }
+                        }
+                    }
+                }
+                rowCount = data.length - 1;
+                colCount = data[0].length - 1;
+            } else {
+                // localStorage에 데이터가 없을 경우 초기 테이블 구조 생성
+                table.innerHTML = `
+                    <tr>
+                        <th>근무자 종류</th>
+                        <th>
+                            <input type="text" placeholder="근무자 종류">
+                            <button class="delete-btn" onclick="deleteColumn(this)">-</button>
+                        </th>
+                    </tr>
+                    <tr>
+                        <th>하루에 몇명씩 근무</th>
+                        <th>
+                            <input type="number" placeholder="근무자수" min="1" max="5" value="1">
+                        </th>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="non-editable">순번1</span>
+                            <button class="delete-btn" onclick="deleteRow(this)">-</button>
+                        </td>
+                        <td><input type="text"></td>
+                    </tr>
+                `;
+                rowCount = 1;
+                colCount = 1;
+            }
+
+            const savedStartDate = localStorage.getItem('startDate');
+            if (savedStartDate) {
+                startDate = new Date(savedStartDate);
+                document.getElementById('startYear').value = startDate.getFullYear();
+                document.getElementById('startMonth').value = startDate.getMonth() + 1;
+                document.getElementById('startDay').value = startDate.getDate();
+            }
+            renderCalendar();
+        }
+
+        function loadHolidayData() {
+            const data = JSON.parse(localStorage.getItem('holidayDutyRosterData'));
+            const table = document.getElementById('holidayRosterTable');
+            table.innerHTML = '';
+            if (data) {
+                for (let i = 0; i < data.length; i++) {
+                    const row = table.insertRow(-1);
+                    for (let j = 0; j < data[i].length; j++) {
+                        const cell = row.insertCell(j);
+                        if (i === 0 && j === 0) {
+                            cell.innerHTML = `<span>${data[i][j]}</span>`;
+                        } else if (i === 0) {
+                            cell.innerHTML = `
+                                <input type="text" placeholder="근무자 종류" value="${data[i][j]}">
+                                <button class="delete-btn" onclick="deleteHolidayColumn(this)">-</button>
+                            `;
+                        } else if (i === 1 && j === 0) {
+                            cell.innerHTML = `<span>${data[i][j]}</span>`;
+                        }
+                        else if (i === 1) {
+                            cell.innerHTML = `
+                                <input type="number" placeholder="근무자수" min="1" max="5" value="${data[i][j]}">
+                            `;
+                        }
+                        else {
+                            if (j === 0) {
+                                cell.innerHTML = `
+                                    <span class="non-editable">${data[i][j]}</span>
+                                    <button class="delete-btn" onclick="deleteHolidayRow(this)">-</button>
+                                `;
+                            } else {
+                                cell.innerHTML = `<input type="text" value="${data[i][j]}">`;
+                            }
+                        }
+                    }
+                }
+                holidayRowCount = data.length - 1;
+                holidayColCount = data[0].length - 1;
+            } else {
+                // localStorage에 데이터가 없을 경우 초기 테이블 구조 생성
+                table.innerHTML = `
+                    <tr>
+                        <th>근무자 종류</th>
+                        <th>
+                            <input type="text" placeholder="근무자 종류">
+                            <button class="delete-btn" onclick="deleteHolidayColumn(this)">-</button>
+                        </th>
+                    </tr>
+                    <tr>
+                        <th>하루에 몇명씩 근무</th>
+                        <th>
+                            <input type="number" placeholder="근무자수" min="1" max="5" value="1">
+                        </th>
+                    </tr>
+                    <tr>
+                        <td>
+                            순번1
+                            <button class="delete-btn" onclick="deleteHolidayRow(this)">-</button>
+                        </td>
+                        <td><input type="text"></td>
+                    </tr>
+                `;
+                holidayRowCount = 1;
+                holidayColCount = 1;
+            }
+
+            const savedHolidayStartDate = localStorage.getItem('holidayStartDate');
+            if (savedHolidayStartDate) {
+                holidayStartDate = new Date(savedHolidayStartDate);
+                document.getElementById('holidayStartYear').value = holidayStartDate.getFullYear();
+                document.getElementById('holidayStartMonth').value = holidayStartDate.getMonth() + 1;
+                document.getElementById('holidayStartDay').value = holidayStartDate.getDate();
+            }
+        }
+
+        let weekdayDutyState = {};
+        let holidayDutyState = {};
+        let weekdayAssignmentResults = {};
+        let holidayAssignmentResults = {};
+
+        function assignDutyToCalendar() {
+            const weekdayTable = document.getElementById('rosterTable');
+            const holidayTable = document.getElementById('holidayRosterTable');
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+
+            let weekdayDutyTypes = [];
+            let 하루에몇명씩근무 = [];
+            let holidayDutyTypes = [];
+            let holidayNumberOfPeople = [];
+
+            for (let i = 1; i < weekdayTable.rows[0].cells.length; i++) {
+                weekdayDutyTypes.push(i);
+                하루에몇명씩근무.push(parseInt(weekdayTable.rows[1].cells[i].querySelector('input').value) || 1);
+                if (!weekdayDutyState[i]) {
+                    weekdayDutyState[i] = { index: 2, lastAssignedDate: null };
+                }
+            }
+
+            for (let i = 1; i < holidayTable.rows[0].cells.length; i++) {
+                holidayDutyTypes.push(i);
+                holidayNumberOfPeople.push(parseInt(holidayTable.rows[1].cells[i].querySelector('input').value) || 1);
+                if (!holidayDutyState[i]) {
+                    holidayDutyState[i] = { index: 2, lastAssignedDate: null };
+                }
+            }
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                const date = new Date(year, month, day);
+                const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const dayCell = document.querySelector(`#calendar td[data-date="${dateString}"]`);
+
+                if (dayCell) {
+                    const dutyInfoDiv = dayCell.querySelector('.duty-info');
+                    dutyInfoDiv.innerHTML = '';
+
+                    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                    const isHoliday = holidays[year][dateString];                    let assignments = [];
+
+                    if (startDate && date >= startDate && !isWeekend && !isHoliday) {
+                        if (!weekdayAssignmentResults[dateString]) {
+                            weekdayAssignmentResults[dateString] = [];
+                            for (let i = 0; i < weekdayDutyTypes.length; i++) {
+                                const colIndex = weekdayDutyTypes[i];
+                                const dutyCount = 하루에몇명씩근무[i];
+
+                                for (let j = 0; j < dutyCount; j++) {
+                                    const state = weekdayDutyState[colIndex];
+                                    if (state.index < weekdayTable.rows.length) {
+                                        const dutyRow = weekdayTable.rows[state.index];
+
+                                        if (dutyRow && dutyRow.cells[colIndex]) {
+                                            const duty = dutyRow.cells[colIndex].querySelector('input').value.trim();
+                                            if (duty) {
+                                                weekdayAssignmentResults[dateString].push(duty);
+                                            }
+                                        }
+
+                                        state.index++;
+                                        if (state.index >= weekdayTable.rows.length || weekdayTable.rows[state.index].cells[colIndex].querySelector('input').value.trim() === '') {
+                                            state.index = 2;
+                                        }
+                                        state.lastAssignedDate = new Date(year, month, day);
+                                    }
+                                }
+                            }
+                        }
+                        assignments = weekdayAssignmentResults[dateString];
+                    }
+                    else if (holidayStartDate && date >= holidayStartDate && (isWeekend || isHoliday)) {
+                        if (!holidayAssignmentResults[dateString]) {
+                            holidayAssignmentResults[dateString] = [];
+                            for (let i = 0; i < holidayDutyTypes.length; i++) {
+                                const colIndex = holidayDutyTypes[i];
+                                const dutyCount = holidayNumberOfPeople[i];
+
+                                for (let j = 0; j < dutyCount; j++) {
+                                    const state = holidayDutyState[colIndex];
+                                    if (state.index < holidayTable.rows.length) {
+                                        const dutyRow = holidayTable.rows[state.index];
+
+                                        if (dutyRow && dutyRow.cells[colIndex]) {
+                                            const duty = dutyRow.cells[colIndex].querySelector('input').value.trim();
+                                            if (duty) {
+                                                holidayAssignmentResults[dateString].push(duty);
+                                            }
+                                        }
+
+                                        state.index++;
+                                        if (state.index >= holidayTable.rows.length || holidayTable.rows[state.index].cells[colIndex].querySelector('input').value.trim() === '') {
+                                            state.index = 2;
+                                        }
+                                        state.lastAssignedDate = new Date(year, month, day);
+                                    }
+                                }
+                            }
+                        }
+                        assignments = holidayAssignmentResults[dateString];
+                    }
+
+                    if (assignments.length > 0) {
+                        const assignmentHTML = assignments.join('<br>');
+                        dutyInfoDiv.innerHTML = assignmentHTML;
+                    }
+                }
+            }
+            saveState();
+        }
+
+        function changeMonth(delta) {
+            saveState();  // 현재 상태 저장
+            currentDate.setMonth(currentDate.getMonth() + delta);
+            loadState();  // 상태 불러오기
+            renderCalendar();
+        }
+
+        window.onload = function() {
+            loadData();
+            loadHolidayData();
+            loadState();
+        };
+      </script>
+</body>
+</html>
