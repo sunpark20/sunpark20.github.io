@@ -6,3 +6,4 @@ Flask>=2.0 # 웹 프레임워크
 flask-cors>=3.0 # CORS 처리
 requests # chromadb 내부 의존성으로 필요할 수 있음
 numpy # chromadb 내부 의존성
+boto3>=1.28.0,<1.29.0  # 예시 버전, 필요시 최신 안정 버전 확인 후 조정
