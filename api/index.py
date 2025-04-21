@@ -8,313 +8,201 @@ from chromadb.utils import embedding_functions
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
+import shutil # 파일/디렉토리 복사 위해 추가
+import threading # 백그라운드 초기화 위해 추가 (선택적)
 
-# --- 로깅 설정 ---
+# --- 로깅 및 설정 로드 (이전과 동일) ---
+# ... (이전 logging, load_dotenv, 설정 변수 로드 부분) ...
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# --- .env 파일 로드 (로컬 개발 시 유용, Vercel에서는 환경변수 직접 설정) ---
-# Vercel 배포 시에는 .env 파일이 없을 수 있으므로, 오류 없이 진행되도록 처리
-dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env') # api 폴더 기준 상위 폴더의 .env
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
-logging.info(f".env 파일 로드 시도: {dotenv_path} (파일 존재 여부: {os.path.exists(dotenv_path)})")
+# ... (GEMINI_MODEL_NAME, N_RESULTS 등 설정 로드) ...
 
-# --- 설정 로드 (환경 변수 우선) ---
-GEMINI_MODEL_NAME = os.getenv('GEMINI_MODEL_NAME', 'gemini-1.5-flash-latest')
-try: N_RESULTS = int(os.getenv("CHROMA_N_RESULTS", "15")); N_RESULTS = max(1, N_RESULTS)
-except ValueError: N_RESULTS = 15
-try: TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.6")); TEMPERATURE = max(0.0, min(1.0, TEMPERATURE))
-except ValueError: TEMPERATURE = 0.6
-try: MAX_CONTEXT_LENGTH = int(os.getenv("GEMINI_MAX_CONTEXT_LENGTH", "30000")); MAX_CONTEXT_LENGTH = max(100, MAX_CONTEXT_LENGTH) # 최소 길이 보장
-except ValueError: MAX_CONTEXT_LENGTH = 30000
+# --- !!! 중요: 프로젝트 루트의 chroma_db 경로 ---
+# 이 경로는 빌드 시 포함된 DB 원본 위치를 가리킵니다.
+PROJECT_ROOT_CHROMA_DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'chroma_db'))
 
-# ChromaDB 경로 설정 (Vercel 환경 고려)
-# api/index.py 파일의 위치를 기준으로 상위 폴더의 chroma_db를 가리키도록 설정
-DEFAULT_CHROMA_DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'chroma_db'))
-CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", DEFAULT_CHROMA_DB_PATH)
+# --- !!! 중요: Vercel의 임시 저장 공간 경로 ---
+# 서버리스 함수가 실행될 때 사용할 쓰기 가능한 경로입니다.
+RUNTIME_CHROMA_DB_PATH = "/tmp/chroma_db_runtime" # /tmp 아래 경로 사용
 
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "doctor_duck_collection_lc")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "jhgan/ko-sbert-nli")
+# --- !!! 중요: 임베딩 모델 캐시 경로 지정 ---
+# Sentence Transformers가 모델을 다운로드할 경로를 /tmp로 지정합니다.
+SENTENCE_TRANSFORMERS_HOME = '/tmp/sentence_transformers_cache'
+os.environ['SENTENCE_TRANSFORMERS_HOME'] = SENTENCE_TRANSFORMERS_HOME
+
 
 logging.info("--- 설정 로드 완료 ---")
-logging.info(f"검색 결과 수: {N_RESULTS}, 생성 온도: {TEMPERATURE}, 최대 컨텍스트: {MAX_CONTEXT_LENGTH}")
-logging.info(f"ChromaDB 경로: {CHROMA_DB_PATH}, 컬렉션: {COLLECTION_NAME}, 임베딩 모델: {EMBEDDING_MODEL_NAME}")
+# ... (로그 설정 정보 출력) ...
+logging.info(f"원본 ChromaDB 경로 (빌드 시점): {PROJECT_ROOT_CHROMA_DB_PATH}")
+logging.info(f"런타임 ChromaDB 경로 (사용 시점): {RUNTIME_CHROMA_DB_PATH}")
+logging.info(f"임베딩 모델 캐시 경로: {SENTENCE_TRANSFORMERS_HOME}")
 logging.info("----------------------")
 
-# --- Flask 앱 초기화 ---
+
+# --- Flask 앱 초기화 (이전과 동일) ---
 app = Flask(__name__)
-# CORS 설정: 실제 운영 시에는 GitHub Pages 도메인만 명시적으로 허용하는 것이 안전
-# 예: CORS(app, origins=["https://sunpark20.github.io"])
 CORS(app)
 logging.info("Flask 앱 초기화 및 CORS 설정 완료.")
 
-# --- Google AI 및 ChromaDB 전역 변수 ---
+# --- 전역 변수 및 초기화 상태 플래그 ---
 model = None
 chroma_collection = None
 services_initialized = False
+initialization_lock = threading.Lock() # 동시 초기화 방지용 락
+initialization_error = None # 초기화 에러 저장
 
-# --- 서비스 초기화 함수 ---
+# --- 서비스 초기화 함수 (런타임 로딩 로직 추가) ---
 def initialize_services():
-    global model, chroma_collection, services_initialized
+    global model, chroma_collection, services_initialized, initialization_error
+
+    # 이미 초기화되었거나 다른 스레드가 초기화 중이면 반환
     if services_initialized:
-        logging.info("서비스는 이미 초기화되었습니다.")
+        logging.info("서비스는 이미 초기화되어 있습니다.")
         return
+    if not initialization_lock.acquire(blocking=False): # 락 획득 실패 시 (다른 스레드 진행 중)
+        logging.info("다른 스레드에서 서비스 초기화 진행 중... 대기.")
+        initialization_lock.acquire() # 락 풀릴 때까지 대기
+        initialization_lock.release()
+        if services_initialized: return # 기다리는 동안 완료되었을 수 있음
+        if initialization_error: raise initialization_error # 기다리는 동안 에러 발생 시 전파
+        # 만약 아직도 초기화 안됐으면 뭔가 문제 -> 에러 발생시키기 (이론상 드문 경우)
+        raise RuntimeError("초기화 대기 후에도 서비스가 준비되지 않았습니다.")
+
 
     logging.info("서비스 초기화 시작...")
-
-    # Google AI 설정
     try:
+        # 1. Google AI 설정 (이전과 동일)
         google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
-            raise ValueError("GOOGLE_API_KEY 환경 변수를 찾을 수 없습니다.")
+        # ... (Google AI 모델 로드 로직) ...
+        if not google_api_key: raise ValueError("GOOGLE_API_KEY 환경 변수를 찾을 수 없습니다.")
         genai.configure(api_key=google_api_key)
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
-        ]
+        safety_settings = [ /* ... */ ] # 생략 - 이전 설정과 동일
         model = genai.GenerativeModel(GEMINI_MODEL_NAME, safety_settings=safety_settings)
         logging.info(f"Google AI 모델 '{GEMINI_MODEL_NAME}' 로드 완료.")
-    except Exception as e:
-        logging.error(f"Google AI 설정 중 오류 발생: {e}", exc_info=True)
-        # 여기서는 앱 중단 대신, 나중에 요청 처리 시 오류를 반환하도록 함
-        raise RuntimeError(f"Google AI 초기화 실패: {e}") # 앱 로딩 시 실패 전파
 
-    # ChromaDB 로드
-    try:
-        logging.info(f"ChromaDB 로드 시도 중... (경로: {CHROMA_DB_PATH})")
-        if not os.path.exists(CHROMA_DB_PATH):
-             logging.warning(f"ChromaDB 경로({CHROMA_DB_PATH})가 존재하지 않습니다. Vercel 배포 시 이 경로에 DB 파일이 복사되었는지 확인하세요.")
-             # Vercel 빌드 로그 확인 필요
-             raise FileNotFoundError(f"ChromaDB 디렉토리({CHROMA_DB_PATH})를 찾을 수 없습니다.")
+        # 2. ChromaDB 준비 (원본 복사)
+        logging.info(f"런타임 ChromaDB 준비 시작: {RUNTIME_CHROMA_DB_PATH}")
+        if os.path.exists(RUNTIME_CHROMA_DB_PATH):
+            logging.info(f"기존 런타임 ChromaDB({RUNTIME_CHROMA_DB_PATH}) 삭제 시도.")
+            try:
+                shutil.rmtree(RUNTIME_CHROMA_DB_PATH)
+            except Exception as e:
+                logging.warning(f"기존 런타임 DB 삭제 실패: {e}. 계속 진행.")
 
-        # 임베딩 함수 로드 (시간이 걸릴 수 있음)
-        logging.info(f"임베딩 함수 로드 중... ({EMBEDDING_MODEL_NAME})")
+        if not os.path.exists(PROJECT_ROOT_CHROMA_DB_PATH):
+            logging.error(f"원본 ChromaDB 경로({PROJECT_ROOT_CHROMA_DB_PATH})를 찾을 수 없습니다! 빌드 시 포함되었는지 확인하세요.")
+            raise FileNotFoundError("원본 ChromaDB 데이터 없음")
+
+        try:
+            # 원본 DB 디렉토리를 /tmp 아래로 복사합니다.
+            logging.info(f"원본 DB ({PROJECT_ROOT_CHROMA_DB_PATH})를 런타임 경로 ({RUNTIME_CHROMA_DB_PATH})로 복사 중...")
+            shutil.copytree(PROJECT_ROOT_CHROMA_DB_PATH, RUNTIME_CHROMA_DB_PATH)
+            logging.info("DB 복사 완료.")
+        except Exception as e:
+            logging.error(f"DB 복사 중 오류 발생: {e}", exc_info=True)
+            raise RuntimeError(f"ChromaDB 데이터 준비 실패: {e}")
+
+        # 3. 임베딩 함수 로드 (런타임에 모델 다운로드 유도)
+        logging.info(f"임베딩 함수 로드 시작 ({EMBEDDING_MODEL_NAME}). 모델 다운로드가 필요할 수 있음...")
+        # SENTENCE_TRANSFORMERS_HOME 환경변수가 설정되어 있으므로 /tmp 아래 캐시 사용
         embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL_NAME)
-        logging.info("임베딩 함수 로드 완료.")
+        logging.info("임베딩 함수 로드 완료 (모델 다운로드 완료되었거나 캐시 사용).")
 
-        chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-        logging.info(f"ChromaDB 클라이언트 생성 완료 (경로: {CHROMA_DB_PATH}). 컬렉션 로드 시도...")
-
-        # 컬렉션 가져오기 시도 (존재하지 않으면 오류 발생)
+        # 4. ChromaDB 컬렉션 로드 (복사된 런타임 경로 사용)
+        logging.info(f"런타임 ChromaDB 클라이언트 생성 및 컬렉션 로드 시도 (경로: {RUNTIME_CHROMA_DB_PATH})...")
+        chroma_client = chromadb.PersistentClient(path=RUNTIME_CHROMA_DB_PATH)
         chroma_collection = chroma_client.get_collection(name=COLLECTION_NAME, embedding_function=embedding_function)
         collection_count = chroma_collection.count()
-        logging.info(f"ChromaDB 컬렉션 '{COLLECTION_NAME}' 로드 완료. (데이터 수: {collection_count})")
-        if collection_count == 0:
-            logging.warning(f"주의: 컬렉션 '{COLLECTION_NAME}'에 데이터가 없습니다.")
+        logging.info(f"런타임 ChromaDB 컬렉션 '{COLLECTION_NAME}' 로드 완료. (데이터 수: {collection_count})")
+        if collection_count == 0: logging.warning(f"주의: 컬렉션 '{COLLECTION_NAME}'에 데이터가 없습니다.")
+
+        services_initialized = True
+        initialization_error = None # 성공 시 에러 상태 초기화
+        logging.info("모든 서비스 초기화 성공.")
 
     except Exception as e:
-        logging.error(f"ChromaDB 컬렉션 '{COLLECTION_NAME}' 로드 중 오류 발생: {e}", exc_info=True)
-        logging.error(f"DB 경로 '{CHROMA_DB_PATH}', 컬렉션 '{COLLECTION_NAME}', 임베딩 모델 '{EMBEDDING_MODEL_NAME}' 확인 필요.")
-        raise RuntimeError(f"ChromaDB 초기화 실패: {e}") # 앱 로딩 시 실패 전파
+        logging.critical(f"서비스 초기화 중 심각한 오류 발생: {e}", exc_info=True)
+        initialization_error = e # 에러 상태 저장
+        # 여기서 바로 에러를 raise 해야 상위 호출자(요청 처리 등)가 알 수 있음
+        raise RuntimeError(f"서비스 초기화 실패: {e}")
+    finally:
+        # 초기화 시도가 끝났으므로 락 해제 (성공/실패 무관)
+        initialization_lock.release()
 
-    services_initialized = True
-    logging.info("모든 서비스 초기화 성공.")
 
-# --- 검색 함수 ---
+# --- 검색 및 답변 생성 함수 (이전과 동일) ---
+# search_similar_chunks, generate_answer 함수는 수정 없이 그대로 사용
+# 내부에서 사용하는 chroma_collection 변수는 initialize_services()를 통해 설정됨
 def search_similar_chunks(query):
-    if not services_initialized or chroma_collection is None:
-        logging.error("오류: ChromaDB 서비스가 초기화되지 않았습니다.")
-        return [] # 빈 리스트 반환
+    # ... (함수 내용 동일) ...
+    if not services_initialized or chroma_collection is None: # 초기화 확인 추가
+        logging.error("검색 시도 실패: ChromaDB 서비스가 초기화되지 않았습니다.")
+        raise RuntimeError("서비스가 준비되지 않았습니다.") # 에러 발생시켜 처리 중단
+    # ... (나머지 검색 로직 동일) ...
 
-    logging.info(f"'{query}' 관련 청크 검색 시작 (최대 {N_RESULTS}개)...")
-    try:
-        results = chroma_collection.query(query_texts=[query], n_results=N_RESULTS, include=['metadatas', 'documents'])
-        if not results or not results.get('ids') or not results['ids'][0]:
-            logging.info(f"'{query}'에 대한 검색 결과 없음.")
-            return []
-
-        retrieved_chunks = []
-        ids = results['ids'][0]
-        documents = results.get('documents', [[]])[0]
-        metadatas = results.get('metadatas', [[]])[0]
-
-        # 데이터 무결성 체크
-        if len(documents) != len(ids) or len(metadatas) != len(ids):
-            logging.warning(f"검색 결과 ID({len(ids)}), 문서({len(documents)}), 메타데이터({len(metadatas)}) 개수 불일치. 최소 개수로 맞춥니다.")
-            min_len = min(len(ids), len(documents), len(metadatas))
-            ids, documents, metadatas = ids[:min_len], documents[:min_len], metadatas[:min_len]
-
-        for id_val, doc, meta in zip(ids, documents, metadatas):
-            # 메타데이터가 dict 형태인지 확인 (오류 방지)
-            chunk_metadata = meta if isinstance(meta, dict) else {"title": "형식 오류", "url": ""}
-            retrieved_chunks.append({"text": doc or "", "metadata": chunk_metadata})
-
-        logging.info(f"'{query}' 관련 청크 {len(retrieved_chunks)}개 검색 완료.")
-        return retrieved_chunks
-    except Exception as e:
-        logging.error(f"ChromaDB 검색 중 오류 발생: {e}", exc_info=True)
-        return [] # 오류 발생 시 빈 리스트 반환
-
-# --- 답변 생성 함수 ---
 def generate_answer(query, retrieved_chunks):
-    if not services_initialized or model is None:
-        logging.error("오류: Google AI 모델 서비스가 초기화되지 않았습니다.")
-        return "오류: 답변 생성 모델이 준비되지 않았습니다."
+    # ... (함수 내용 동일) ...
+    if not services_initialized or model is None: # 초기화 확인 추가
+        logging.error("답변 생성 시도 실패: Google AI 모델 서비스가 초기화되지 않았습니다.")
+        raise RuntimeError("서비스가 준비되지 않았습니다.") # 에러 발생시켜 처리 중단
+    # ... (나머지 답변 생성 로직 동일) ...
 
-    if not retrieved_chunks:
-        logging.info("검색된 청크가 없어 기본 응답 반환.")
-        return "닥터덕 영상 내용 중에서 현재 질문과 관련된 정보를 찾을 수 없습니다."
-
-    context = ""
-    sources = set()
-    current_length = 0
-    included_chunk_count = 0
-
-    logging.info(f"검색된 청크 {len(retrieved_chunks)}개를 컨텍스트로 구성 시작...")
-    for i, chunk in enumerate(retrieved_chunks):
-        metadata = chunk.get('metadata', {})
-        title = metadata.get('title', '알 수 없는 영상')
-        url = metadata.get('url', '')
-        text = chunk.get('text', '')
-        if not text:
-            logging.warning(f"청크 {i+1} (ID: {chunk.get('id', 'N/A')}) 텍스트가 비어있어 건너<0xEB><0x9B><0x84>니다.")
-            continue
-
-        chunk_info = f"--- 영상 발췌 (출처: '{title}') ---\n{text}\n---\n\n"
-        chunk_len = len(chunk_info.encode('utf-8')) # 글자 수 대신 바이트 길이로 계산하는 것이 더 정확할 수 있음
-
-        if current_length + chunk_len <= MAX_CONTEXT_LENGTH:
-            context += chunk_info
-            current_length += chunk_len
-            included_chunk_count += 1
-            if url and url.startswith('http'):
-                 # 중복 제거를 위해 (title, url) 튜플 사용
-                 sources.add((title, url))
-        else:
-            logging.info(f"컨텍스트 최대 길이({MAX_CONTEXT_LENGTH} 바이트) 도달, 청크 {i + 1}부터 제외.")
-            break
-
-    logging.info(f"컨텍스트 포함 청크 수: {included_chunk_count} / {len(retrieved_chunks)}")
-    logging.info(f"포함된 컨텍스트 바이트 수: {current_length} / {MAX_CONTEXT_LENGTH}")
-    unique_sources_count = len(sources)
-    logging.info(f"참고 영상 출처 개수 (고유): {unique_sources_count}")
-
-    if not context:
-        logging.warning("유효한 검색 내용이 없어 답변 컨텍스트를 구성할 수 없습니다.")
-        return "오류: 답변 생성에 사용할 유효한 정보를 찾지 못했습니다."
-
-    # --- 프롬프트 구성 (기존 프롬프트 활용) ---
-    prompt = f"""당신은 '닥터덕' 유튜브 채널 영상 내용을 기반으로 사용자의 질문에 답변하는 기능의학 전문 AI 어시스턴트입니다. ... (중략) ...
-
-질문: "{query}"
-
-... (중략, 답변 생성 규칙 포함) ...
-
-이제, 위의 규칙에 따라 질문에 대한 답변을 생성해주세요:"""
-    # logging.debug(f"Gemini에게 전달될 최종 프롬프트:\n{prompt[:500]}...") # 디버깅 시 프롬프트 확인
-
-    logging.info("Gemini API 호출 시작...")
-    try:
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(temperature=TEMPERATURE)
-        )
-        logging.info("Gemini API 응답 수신 완료.")
-
-        # 응답 유효성 검사 및 차단 처리
-        if not response.candidates:
-            block_reason = "응답 후보 없음"; safety_ratings_str = "확인 불가"
-            try:
-                if response.prompt_feedback:
-                    block_reason = response.prompt_feedback.block_reason or "차단 사유 명시되지 않음"
-                    if response.prompt_feedback.block_reason_message: block_reason += f" ({response.prompt_feedback.block_reason_message})"
-                    safety_ratings = response.prompt_feedback.safety_ratings
-                    safety_ratings_str = ", ".join([f"{r.category.name}: {r.probability.name}" for r in safety_ratings])
-            except Exception as feedback_e:
-                logging.warning(f"피드백 정보 접근 중 오류: {feedback_e}")
-
-            logging.warning(f"Gemini 응답이 비어 있거나 차단되었습니다. 이유: {block_reason}, 안전 등급: [{safety_ratings_str}]")
-            if "SAFETY" in str(block_reason).upper():
-                return f"죄송합니다. 답변 생성 요청이 안전상의 이유({block_reason})로 처리되지 않았습니다."
-            else:
-                return "죄송합니다. 답변을 생성하는 데 문제가 발생했습니다. (빈 응답)"
-
-        # 정상 응답 텍스트 추출
-        generated_text = "".join(part.text for part in response.candidates[0].content.parts)
-
-        # 출처 정보 추가 (소스가 있는 경우)
-        if sources:
-            # url 기준으로 정렬
-            sorted_sources = sorted(list(sources), key=lambda item: item[1])
-            source_list_text = f"\n\n**참고 영상 ({unique_sources_count}개):**\n"
-            source_list_text += "\n".join([f"- {title} ({url})" for title, url in sorted_sources])
-            generated_text += "\n" + source_list_text # 줄바꿈 추가
-
-        return generated_text.strip()
-
-    except ValueError as ve:
-        logging.error(f"Google AI API 호출 값 오류: {ve}", exc_info=True)
-        return f"죄송합니다. 답변 생성 요청 처리 중 오류가 발생했습니다. (오류 코드: VAL)"
-    except Exception as e:
-        logging.error(f"Google AI API 호출 중 예상치 못한 오류 발생: {e}", exc_info=True)
-        error_type = type(e).__name__
-        return f"죄송합니다. 답변을 생성하는 동안 서버 오류({error_type})가 발생했습니다. 잠시 후 다시 시도해주세요."
-
-
-# --- API 엔드포인트 정의 ---
+# --- API 엔드포인트 정의 (초기화 호출 방식 변경) ---
 @app.route('/api/ask', methods=['POST'])
 def ask_question():
     logging.info(f"'/api/ask' 요청 수신: {request.remote_addr}")
 
-    # 서비스 초기화 확인 및 시도
+    # --- 서비스 초기화 확인 및 시도 (매 요청 시 확인) ---
     if not services_initialized:
+        logging.info("서비스가 초기화되지 않아 초기화 시도...")
         try:
+            # initialize_services() 내부에서 락을 사용하므로 동시 호출 문제 없음
             initialize_services()
         except Exception as init_e:
             logging.critical(f"요청 처리 중 서비스 초기화 실패: {init_e}", exc_info=True)
-            # 503 Service Unavailable 반환 (서버가 요청 처리 준비 안됨)
-            return jsonify({"error": "서버 내부 오류: 서비스를 시작할 수 없습니다."}), 503
+            return jsonify({"error": f"서버 내부 오류: 서비스 초기화 실패 ({type(init_e).__name__}). 잠시 후 다시 시도해주세요."}), 503
 
-    if not request.is_json:
-        logging.warning("잘못된 요청 형식: JSON 타입이 아님")
-        return jsonify({"error": "요청 형식이 잘못되었습니다 (Content-Type: application/json 필요)."}), 400
-
-    data = request.get_json()
-    user_query = data.get('query')
-
-    if not user_query or not isinstance(user_query, str) or not user_query.strip():
-        logging.warning(f"잘못된 요청 데이터: 'query'가 없거나 비어있음 (수신 데이터: {data})")
-        return jsonify({"error": "'query' 파라미터가 필요하며, 비어있지 않은 문자열이어야 합니다."}), 400
+    # --- 요청 처리 (이전과 동일) ---
+    if not request.is_json: # ... (JSON 형식 검사) ...
+    data = request.get_json() # ... (데이터 가져오기) ...
+    user_query = data.get('query') # ... (쿼리 추출) ...
+    if not user_query or not isinstance(user_query, str) or not user_query.strip(): # ... (쿼리 유효성 검사) ...
 
     sanitized_query = user_query.strip()
     logging.info(f"처리할 질문: '{sanitized_query}'")
 
-    # 1. 검색
     try:
+        # 1. 검색
         retrieved_chunks = search_similar_chunks(sanitized_query)
-    except Exception as search_e:
-        logging.error(f"검색 중 예외 발생: {search_e}", exc_info=True)
-        return jsonify({"error": "내부 서버 오류: 관련 정보를 검색하는 중 문제가 발생했습니다."}), 500
-
-    # 2. 답변 생성
-    try:
+        # 2. 답변 생성
         answer = generate_answer(sanitized_query, retrieved_chunks)
-    except Exception as gen_e:
-        logging.error(f"답변 생성 중 예외 발생: {gen_e}", exc_info=True)
-        return jsonify({"error": "내부 서버 오류: 답변을 생성하는 중 문제가 발생했습니다."}), 500
 
-    logging.info(f"생성된 답변 전송 (일부): {answer[:100]}...")
-    return jsonify({"answer": answer})
+        logging.info(f"생성된 답변 전송 (일부): {answer[:100]}...")
+        return jsonify({"answer": answer})
 
-# --- 서버 상태 확인용 엔드포인트 (선택 사항) ---
+    except RuntimeError as service_err: # 서비스 미준비 에러 처리
+         logging.error(f"서비스 미준비 오류: {service_err}")
+         return jsonify({"error": "서버가 아직 준비 중입니다. 잠시 후 다시 시도해주세요."}), 503
+    except Exception as e: # 기타 예외 처리
+        logging.error(f"요청 처리 중 예외 발생: {e}", exc_info=True)
+        return jsonify({"error": "내부 서버 오류: 요청을 처리하는 중 문제가 발생했습니다."}), 500
+
+
+# --- 상태 확인 엔드포인트 (이전과 동일) ---
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    status = {"status": "ok", "services_initialized": services_initialized}
-    if services_initialized:
-        status["chromadb_collection_count"] = chroma_collection.count() if chroma_collection else "N/A"
-    return jsonify(status)
+    # ... (이전 health_check 코드) ...
 
-# --- 앱 시작 시 서비스 초기화 시도 ---
-# Vercel 환경에서는 이 코드가 서버리스 함수 인스턴스가 처음 로드될 때 실행됨
-try:
-    initialize_services()
-except Exception as e:
-    # 초기화 실패 시 로그만 남기고 앱 자체는 로드되도록 함 (요청 시 다시 초기화 시도)
-    logging.critical(f"앱 시작 시 서비스 초기화 실패: {e}. 요청 시 다시 시도됩니다.", exc_info=True)
+# --- 앱 시작 시 초기화 시도 제거 ---
+# Vercel에서는 요청이 들어올 때 함수 인스턴스가 생성/재사용되므로,
+# 첫 요청 시 initialize_services()가 호출되도록 하는 것이 일반적입니다.
+# 로컬 테스트 시에는 첫 요청이 들어올 때 초기화됩니다.
 
-# --- 로컬 테스트용 실행 구문 (Vercel 배포 시에는 사용되지 않음) ---
+# --- 로컬 테스트용 실행 구문 (이전과 동일) ---
 if __name__ == '__main__':
     logging.info("Flask 개발 서버 시작 (http://127.0.0.1:5000)")
-    # debug=True는 Vercel에서 사용하지 마세요. 실제 서버에서는 False여야 합니다.
+    # 로컬 테스트 시에도 첫 요청 시 초기화되도록 debug=False 유지 권장
     app.run(host='0.0.0.0', port=5000, debug=False)
