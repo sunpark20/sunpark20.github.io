@@ -1,0 +1,139 @@
+/* ... (이전 body, page-container, chat-wrapper 스타일 유지) ... */
+body { font-family: 'Google Sans', 'Noto Sans KR', sans-serif; background-color: #fff; margin: 0; color: #3c4043; }
+.page-container { display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; box-sizing: border-box; }
+.chat-wrapper { width: 100%; max-width: 860px; height: 85vh; max-height: 750px; display: flex; flex-direction: column; }
+
+/* 초기 화면 (대화 시작 전) */
+.initial-screen {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column; /* 제목과 입력창을 세로로 쌓음 */
+    justify-content: center; /* 내용(제목+입력창 그룹)을 수직 중앙 정렬 */
+    align-items: center; /* 내용(제목+입력창 그룹)을 수평 중앙 정렬 */
+    text-align: center;
+    padding: 20px; /* 내부 여백 */
+    box-sizing: border-box;
+}
+
+/* 제목 그라데이션 스타일 */
+.gradient-title {
+    font-size: 3.5rem;
+    font-weight: 500;
+    background: linear-gradient(to right, #4285F4, #1A73E8, #0D47A1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 25px; /* 제목과 입력창 사이 간격 조정 */
+}
+
+/* 대화창 (메시지 표시 영역) */
+.chat-box {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 20px 10px 20px 20px;
+    /* margin-bottom 제거 또는 조정 (JS로 위치 변경 후 CSS로 처리) */
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+/* ... (메시지 스타일 동일) ... */
+.message { padding: 12px 18px; border-radius: 20px; max-width: 75%; line-height: 1.5; word-wrap: break-word; font-size: 0.95rem; }
+.user-message { background-color: #e3f2fd; color: #174ea6; align-self: flex-end; border-bottom-right-radius: 5px; }
+.ai-message { background-color: #f8f9fa; color: #3c4043; align-self: flex-start; border-bottom-left-radius: 5px; position: relative; padding-left: 45px; }
+.ai-message::before { content: "닥"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%); background-color: #1a73e8; color: white; width: 26px; height: 26px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 13px; font-weight: bold; }
+
+
+/* 하단 입력 섹션 (공통 스타일) */
+/* 초기 위치와 최종 위치 모두에 적용될 스타일 */
+.input-section {
+    padding: 10px 10px 15px 10px;
+    width: 100%; /* 너비를 부모에 맞춤 (초기/최종 위치 모두) */
+    max-width: 700px; /* 입력 영역 최대 너비 제한 (선택 사항) */
+    box-sizing: border-box; /* 패딩 포함 너비 계산 */
+    /* margin: 0 auto; */ /* 초기 화면에서 중앙 정렬 위해 필요시 */
+}
+
+/* .initial-screen 내부에 있을 때의 추가 스타일 (필요시) */
+.initial-screen .input-section {
+     /* 특별히 초기 상태에서만 필요한 스타일이 있다면 여기에 추가 */
+     /* 예를 들어, 초기 화면에서는 그림자가 없게 하려면: */
+     /* box-shadow: none; */
+}
+
+/* chat-wrapper의 마지막 자식일 때 (최종 위치) 스타일 */
+.chat-wrapper > .input-section {
+    margin-top: auto; /* 대화창 아래에 붙도록 함 (flex-grow와 함께 작동) */
+    padding-bottom: 20px; /* 하단 여백 추가 */
+}
+
+
+/* 입력창과 버튼을 감싸는 영역 */
+.input-area {
+    display: flex;
+    align-items: center;
+    background-color: #fff;
+    border: 1px solid #dadce0;
+    border-radius: 50px;
+    padding: 5px 8px 5px 15px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    width: 100%; /* 부모(.input-section) 너비에 맞춤 */
+    box-sizing: border-box;
+}
+.input-area:focus-within {
+    border-color: #a0c3ff;
+    box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+}
+
+/* 실제 텍스트 입력창 */
+#user-input {
+    flex-grow: 1;
+    border: none;
+    outline: none;
+    font-size: 1rem;
+    padding: 10px 0;
+    background-color: transparent;
+    color: #3c4043;
+    margin-left: 5px;
+}
+#user-input::placeholder { color: #80868b; }
+
+/* Run 버튼 */
+.run-button {
+    display: inline-flex;
+    align-items: center;
+    background-color: #f1f3f4;
+    border: none;
+    border-radius: 50px;
+    padding: 8px 12px 8px 16px;
+    margin-left: 10px;
+    color: #3c4043;
+    font-weight: 500;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+.run-button:hover { background-color: #e8eaed; }
+.run-button span { vertical-align: middle; }
+.run-button .material-icons { font-size: 20px; margin-left: 4px; }
+
+/* 로딩 인디케이터 스타일 */
+.message.loading {
+    font-style: italic;
+    color: #888;
+    align-self: flex-start; /* AI 메시지처럼 왼쪽에 표시 */
+    background-color: #f8f9fa; /* AI 메시지 배경과 유사하게 */
+    /* 아이콘 대신 텍스트만 보이도록 padding 조정 */
+    padding: 12px 18px;
+}
+.message.loading::before {
+    display: none; /* AI 아이콘 숨기기 */
+}
+
+/* 버튼/입력창 비활성화 시 스타일 */
+#send-button:disabled,
+#user-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}

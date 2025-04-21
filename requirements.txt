@@ -1,0 +1,8 @@
+google-generativeai
+python-dotenv
+chromadb>=0.4.24,<0.5.0 # 버전 명시 권장
+sentence-transformers>=2.2.0 # 임베딩 모델에 필요
+Flask>=2.0 # 웹 프레임워크
+flask-cors>=3.0 # CORS 처리
+requests # chromadb 내부 의존성으로 필요할 수 있음
+numpy # chromadb 내부 의존성

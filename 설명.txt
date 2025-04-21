@@ -1,0 +1,12 @@
+your-project-directory/
+├── api/                  # Vercel이 Python API를 인식하는 폴더
+│   └── index.py          # Flask 앱 로직 (기존 run.py 기반)
+├── chroma_db/            # RAG 데이터베이스 폴더 (***중요: 프로젝트에 포함***)
+│   └── ... (chromadb 파일들)
+├── public/               # GitHub Pages용 정적 파일 폴더 (또는 루트에 직접)
+│   ├── index.html
+│   ├── style.css
+│   └── script.js
+├── .env                  # 로컬 테스트용 환경 변수 (Git에 포함시키지 마세요!)
+├── requirements.txt      # Python 의존성 목록
+└── .gitignore            # Git 추적 제외 파일 목록
