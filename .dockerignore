@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+Thumbs.db
+# 로컬 ChromaDB 데이터는 포함하지 않음 (R2에서 다운로드하므로)
+chroma_db/
+# 기타 로컬 설정 파일 등
+.vscode/
